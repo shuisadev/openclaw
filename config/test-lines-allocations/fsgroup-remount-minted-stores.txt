@@ -1,6 +1,5 @@
-141
-# Credit is the checker's count after rebasing onto a base whose ceiling moved;
-# the same tests counted 98 against the earlier base.
+130
+# PR #196394: 130 net regression lines for fsGroup PVC remount repairs.
 # fsGroup PVC remount regressions for the stores restorePrivateStateStoreModes
 # repairs whose names the installation mints at runtime: one managed GitHub
 # identity generation per scope (system, personal, and agents/<hashed id>) and
