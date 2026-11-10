@@ -405,8 +405,16 @@ export function restorePrivateStateStoreModes(env: NodeJS.ProcessEnv): void {
   for (const [directory, file] of PRIVATE_STATE_STORES) {
     restoreStoreDirectorySync(path.join(stateDir, directory), [file]);
   }
-  // TEMP DEBUG: disabled while root-causing e2e flake during rebase
-  // restoreMintedPrivateStoresSync(stateDir);
+  // Only repair minted stores when this state dir actually contains openclaw-owned
+  // private stores. Test harnesses sometimes point OPENCLAW_STATE_DIR at a synthetic
+  // fixture that carries credentials/github (fixture-write managed profiles for a
+  // session test) but no SQLite state stores — those paths are not ours to harden.
+  const hasOpenClawStores =
+    existsSync(`${stateDir}${UPDATE_CAPTURE_ROOT_SUFFIX}`) ||
+    PRIVATE_STATE_STORES.some(([dir]) => existsSync(path.join(stateDir, dir)));
+  if (hasOpenClawStores) {
+    restoreMintedPrivateStoresSync(stateDir);
+  }
 }
 
 export function ensureOpenClawStatePermissions(
