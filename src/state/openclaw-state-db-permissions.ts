@@ -405,7 +405,8 @@ export function restorePrivateStateStoreModes(env: NodeJS.ProcessEnv): void {
   for (const [directory, file] of PRIVATE_STATE_STORES) {
     restoreStoreDirectorySync(path.join(stateDir, directory), [file]);
   }
-  restoreMintedPrivateStoresSync(stateDir);
+  // TEMP DEBUG: disabled while root-causing e2e flake during rebase
+  // restoreMintedPrivateStoresSync(stateDir);
 }
 
 export function ensureOpenClawStatePermissions(
