@@ -1,0 +1,2 @@
+55
+# BUG-317 pre-fix RED / post-fix GREEN proof: Set guard permanently blocks re-sweep within a long-running process. 55 lines fold into existing writeCliImages describe; no new test files. Required because a pass-only test cannot distinguish Set (always-skim) from Map+interval (re-sweep after 24h).
