@@ -317,6 +317,61 @@ describe("writeCliImages", () => {
       envSnapshot.restore();
     }
   });
+
+  it("re-sweeps stale workspace images across long-running invocations", async () => {
+    vi.useFakeTimers();
+    const baseNow = new Date("2026-11-01T00:00:00Z");
+    vi.setSystemTime(baseNow);
+    const baseNowMs = baseNow.getTime();
+
+    const workspaceDir = tempDirs.make("cli-image-resweep-");
+    const imageRoot = path.join(workspaceDir, ".openclaw-cli-images");
+    await fs.mkdir(imageRoot, { recursive: true });
+
+    // 第一个过期文件（8 天前 mtime，超过 7 天 TTL）
+    // fs.utimes 接受秒数（Unix timestamp），Date.now() 返回毫秒，需 /1000
+    const staleBefore = path.join(imageRoot, "stale-before.png");
+    await fs.writeFile(staleBefore, Buffer.from("fake-stale-before"));
+    const eightDaysAgoMs = baseNowMs - 8 * 24 * 60 * 60 * 1000;
+    await fs.utimes(staleBefore, eightDaysAgoMs / 1000, eightDaysAgoMs / 1000);
+
+    const backend = { command: "test", imagePathScope: "workspace" as const };
+    const image = pngImage("dGVzdA==");
+
+    // 第一次调用 → sweep 执行 → staleBefore 被清
+    await prepareCliPromptImagePayload({
+      backend,
+      prompt: "hi",
+      workspaceDir,
+      images: [image],
+    });
+    await expect(fs.access(staleBefore)).rejects.toThrow();
+
+    // fake timer 推进 25h（超过 24h 清理间隔）
+    vi.advanceTimersByTime(25 * 60 * 60 * 1000);
+
+    // 进程运行期间新写入的文件，再过 8 天就过期（按 fake now 算）
+    const staleAfter = path.join(imageRoot, "stale-after.png");
+    await fs.writeFile(staleAfter, Buffer.from("fake-stale-after"));
+    const afterBaseMs = baseNowMs + 25 * 60 * 60 * 1000;
+    const afterMtimeMs = afterBaseMs - 8 * 24 * 60 * 60 * 1000;
+    await fs.utimes(staleAfter, afterMtimeMs / 1000, afterMtimeMs / 1000);
+
+    // 第二次调用
+    await prepareCliPromptImagePayload({
+      backend,
+      prompt: "hi again",
+      workspaceDir,
+      images: [image],
+    });
+
+    // 关键断言：sweep 应再次执行 → staleAfter 被清
+    // pre-fix (Set 永久守卫): Set.has()=true → 跳过 sweep → 文件仍在 → FAIL
+    // post-fix (Map + 24h 间隔): 间隔超 24h → 放行 → sweep → 文件被清 → PASS
+    await expect(fs.access(staleAfter)).rejects.toThrow();
+
+    vi.useRealTimers();
+  });
 });
 
 it.each([
