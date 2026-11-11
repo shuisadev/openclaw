@@ -54,7 +54,13 @@ process.on("unhandledRejection", (error) => log("unhandled: " + (error && error.
 process.on("exit", (code) => log("process exit code=" + code));
 
 if (process.argv.includes("--version")) {
-  process.stdout.write("2.1.322 (proof fixture)\n");
+  process.stdout.write("2.1.322 (Claude Code)\n");
+  process.exit(0);
+}
+// The shipped launcher probes account state before it launches a turn.
+if (process.argv.includes("auth")) {
+  log("auth probe argv=" + process.argv.slice(1).join(" "));
+  send({ loggedIn: false });
   process.exit(0);
 }
 
