@@ -116,6 +116,15 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
   rows.push({ type: "user", uuid: userUuid, parentUuid: null, message: message.message });
   let parentUuid = userUuid;
 
+  send({
+    type: "system",
+    subtype: "init",
+    session_id: sessionId,
+    cwd: process.cwd(),
+    tools: ["Read", "Write", "Edit", "mcp__openclaw__automations"],
+    mcp_servers: mcpConfigPath ? [{ name: "openclaw", status: "connected" }] : [],
+  });
+
   if (MODE === "add") {
     const result = await callSchedulerTool();
     const toolId = "toolu_" + randomUUID();
@@ -250,7 +259,7 @@ async function chatTurn(fixture: ProofFixture) {
       deliver: false,
       idempotencyKey: randomUUID(),
     });
-    const completed = await fixture.gateway.client.request(
+    completed = await fixture.gateway.client.request(
       "agent.wait",
       { runId: accepted.runId, timeoutMs: 90_000 },
       { timeoutMs: 95_000 },
