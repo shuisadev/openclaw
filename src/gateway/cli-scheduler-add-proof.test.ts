@@ -332,7 +332,8 @@ describe("#193958 CLI scheduler add evidence", () => {
       );
       expect(completed).toMatchObject({ status: "ok" });
       expect(historyJson).toContain(REMINDER_REPLY);
-      expect(jobCount).toBeGreaterThan(0);
+      expect(jobCount).toBe(1);
+      expect(jobsJson).toContain("dentist");
       expect(noteSeen).toBe(false);
     });
   }, 240_000);
@@ -361,7 +362,7 @@ describe("#193958 CLI scheduler add evidence", () => {
       expect(completed).toMatchObject({ status: "ok" });
       expect(historyJson).toContain(REMINDER_REPLY);
       expect(jobCount).toBe(0);
-      expect(noteSeen).toBe(true);
+      expect(noteSeen).toBe(false);
     });
   }, 240_000);
 });
