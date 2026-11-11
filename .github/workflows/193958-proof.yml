@@ -16,7 +16,7 @@ concurrency:
 jobs:
   proof:
     name: Real claude CLI turn through the Gateway MCP loopback
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     timeout-minutes: 75
     steps:
       - name: Checkout proof branch
