@@ -140,6 +140,7 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
         type: "tool_result",
         tool_use_id: toolId,
         content: [{ type: "text", text: result.text.slice(0, 800) }],
+        ...(result.text.includes("\"error\"") ? { is_error: true } : {}),
       }],
     };
     send({ type: "user", uuid: resultUuid, message: toolResultMessage });
@@ -228,6 +229,11 @@ async function withProofGateway(
 
 async function chatTurn(fixture: ProofFixture) {
   const sessionKey = `agent:main:proof-${randomUUID()}`;
+  await fixture.gateway.client.request("sessions.create", {
+    agentId: "main",
+    key: sessionKey,
+    model: MODEL_REF,
+  });
   const seen: string[] = [];
   const stopEvents = onAgentEvent((event) => {
     seen.push(
@@ -236,6 +242,7 @@ async function chatTurn(fixture: ProofFixture) {
     );
   });
   let accepted: { runId: string };
+  let completed: unknown;
   try {
     accepted = await fixture.gateway.client.request<{ runId: string }>("chat.send", {
       sessionKey,
