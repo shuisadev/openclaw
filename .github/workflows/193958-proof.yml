@@ -49,8 +49,7 @@ jobs:
             echo "### head: $(git rev-parse HEAD)"
           } | tee proof.log
           set +e
-          node --import ./scripts/tsx.mjs scripts/run-with-env.mts OPENCLAW_GATEWAY_PROJECT_SHARDS=0 -- \
-            node scripts/run-vitest.mjs run \
+          OPENCLAW_GATEWAY_PROJECT_SHARDS=0 node scripts/run-vitest.mjs run \
             --config test/vitest/vitest.gateway.config.ts \
             src/gateway/cli-scheduler-add-proof.test.ts \
             2>&1 | tee -a proof.log
