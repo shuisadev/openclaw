@@ -1,0 +1,62 @@
+name: 193958 proof - CLI scheduler add suppresses false reminder note
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - proof/193958
+
+permissions:
+  contents: read
+
+concurrency:
+  group: 193958-proof-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  proof:
+    name: Real claude CLI turn through the Gateway MCP loopback
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - name: Checkout proof branch
+        uses: actions/checkout@v4
+
+      - name: Setup Node environment
+        uses: ./.github/actions/setup-node-env
+        with:
+          install-bun: "true"
+          install-deps: "true"
+          frozen-lockfile: "true"
+
+      - name: Install Claude Code CLI
+        run: |
+          set -euo pipefail
+          npm install -g @anthropic-ai/claude-code
+          command -v claude
+          claude --version
+
+      - name: Run real CLI path proof
+        env:
+          NO_COLOR: "1"
+        run: |
+          set -euo pipefail
+          export OPENCLAW_PROOF_CLAUDE_BIN="$(command -v claude)"
+          echo "proof claude binary: $OPENCLAW_PROOF_CLAUDE_BIN"
+          {
+            echo "### node $(node --version)"
+            echo "### claude: $(claude --version 2>&1 | head -1)"
+            echo "### head: $(git rev-parse HEAD)"
+          } | tee proof.log
+          node scripts/run-vitest.mjs run \
+            --config test/vitest/vitest.e2e.config.ts \
+            src/gateway/cli-scheduler-add-proof.e2e.test.ts \
+            2>&1 | tee -a proof.log
+
+      - name: Upload proof log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: 193958-proof-log
+          path: proof.log
+          retention-days: 14
