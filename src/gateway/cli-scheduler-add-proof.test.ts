@@ -47,6 +47,10 @@ const EVIDENCE = ${JSON.stringify(options.evidencePath)};
 const PROJECT_DIR = ${JSON.stringify(options.projectDir)};
 const log = (line) => appendFileSync(EVIDENCE, "[claude-fixture] " + line + "\n");
 const send = (message) => process.stdout.write(JSON.stringify(message) + "\n");
+log("process start argv=" + process.argv.slice(1).join(" "));
+process.on("uncaughtException", (error) => log("uncaught: " + (error && error.stack || error)));
+process.on("unhandledRejection", (error) => log("unhandled: " + (error && error.stack || error)));
+process.on("exit", (code) => log("process exit code=" + code));
 
 if (process.argv.includes("--version")) {
   process.stdout.write("2.1.322 (proof fixture)\n");
@@ -55,6 +59,7 @@ if (process.argv.includes("--version")) {
 
 const mcpIndex = process.argv.indexOf("--mcp-config");
 const mcpConfigPath = mcpIndex >= 0 ? process.argv[mcpIndex + 1] : undefined;
+log("mcp-config path=" + String(mcpConfigPath));
 const sessionIndex = process.argv.indexOf("--session-id");
 const resumeIndex = process.argv.indexOf("--resume");
 const sessionId = process.argv[(resumeIndex >= 0 ? resumeIndex : sessionIndex) + 1];
@@ -89,6 +94,8 @@ async function callSchedulerTool() {
 
 createInterface({ input: process.stdin }).on("line", async (line) => {
   const message = JSON.parse(line);
+  log("stdin line type=" + message.type + " subtype=" + (message.request && message.request.subtype));
+  try {
   if (message.type === "control_request" && message.request && message.request.subtype === "initialize") {
     send({ type: "control_response", response: {
       subtype: "success", request_id: message.request_id, response: { commands: [], models: [] },
@@ -146,6 +153,10 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
     })).join("\n") + "\n",
   );
   send({ type: "result", subtype: "success", is_error: false, result: reply, session_id: sessionId });
+  } catch (error) {
+    log("turn failed: " + (error && error.stack || error));
+    send({ type: "result", subtype: "error", is_error: true, result: String(error), session_id: sessionId });
+  }
 });
 `;
 }
