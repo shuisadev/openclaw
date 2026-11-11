@@ -28,8 +28,11 @@ const REMINDER_REPLY = "Sure - I'll remind you tomorrow at 9am to call the denti
 const NOTE_FRAGMENT = "I did not schedule a reminder";
 const SCHEDULER_JOB = {
   name: "dentist",
-  schedule: { kind: "at", at: "2026-11-12T01:00:00.000Z" },
-  prompt: "Call the dentist.",
+  enabled: true,
+  schedule: { kind: "at", at: new Date(Date.now() + 3_600_000).toISOString() },
+  sessionTarget: "current",
+  payload: { kind: "agentTurn", message: "Call the dentist." },
+  delivery: { mode: "none" },
 };
 
 function fakeClaudeScript(options: {
@@ -278,6 +281,20 @@ async function chatTurn(fixture: ProofFixture) {
     sessionKey,
     limit: 100,
   });
+  let deliveredNote = false;
+  for (let attempt = 0; attempt < 15 && !deliveredNote; attempt += 1) {
+    deliveredNote =
+      JSON.stringify(history.messages).includes(NOTE_FRAGMENT) ||
+      seen.join("\n").includes(NOTE_FRAGMENT);
+    if (!deliveredNote) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      const again = await fixture.gateway.client.request<{ messages: unknown[] }>("chat.history", {
+        sessionKey,
+        limit: 100,
+      });
+      history.messages = again.messages;
+    }
+  }
   const jobs = await fixture.gateway.client
     .request<{ jobs?: unknown[] }>("cron.list", { includeDisabled: true })
     .catch(() => ({ jobs: [] }));
@@ -287,6 +304,7 @@ async function chatTurn(fixture: ProofFixture) {
     eventText: seen.join("\n"),
     jobCount: Array.isArray(jobs.jobs) ? jobs.jobs.length : 0,
     jobsJson: JSON.stringify(jobs).slice(0, 1200),
+    deliveredNote,
   };
 }
 
@@ -295,8 +313,10 @@ describe("#193958 CLI scheduler add evidence", () => {
     const evidencePath = path.join(process.cwd(), "proof-evidence-scheduled.txt");
     await fs.writeFile(evidencePath, "");
     await withProofGateway("cli-proof-scheduled", "add", evidencePath, async (fixture) => {
-      const { completed, historyJson, eventText, jobCount, jobsJson } = await chatTurn(fixture);
-      const noteSeen = historyJson.includes(NOTE_FRAGMENT) || eventText.includes(NOTE_FRAGMENT);
+      const { completed, historyJson, eventText, jobCount, jobsJson, deliveredNote } =
+        await chatTurn(fixture);
+      const noteSeen =
+        deliveredNote || historyJson.includes(NOTE_FRAGMENT) || eventText.includes(NOTE_FRAGMENT);
       await fs.appendFile(
         evidencePath,
         [
@@ -321,8 +341,10 @@ describe("#193958 CLI scheduler add evidence", () => {
     const evidencePath = path.join(process.cwd(), "proof-evidence-control.txt");
     await fs.writeFile(evidencePath, "");
     await withProofGateway("cli-proof-control", "text", evidencePath, async (fixture) => {
-      const { completed, historyJson, eventText, jobCount, jobsJson } = await chatTurn(fixture);
-      const noteSeen = historyJson.includes(NOTE_FRAGMENT) || eventText.includes(NOTE_FRAGMENT);
+      const { completed, historyJson, eventText, jobCount, jobsJson, deliveredNote } =
+        await chatTurn(fixture);
+      const noteSeen =
+        deliveredNote || historyJson.includes(NOTE_FRAGMENT) || eventText.includes(NOTE_FRAGMENT);
       await fs.appendFile(
         evidencePath,
         [
