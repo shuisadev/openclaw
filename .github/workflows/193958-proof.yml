@@ -58,6 +58,8 @@ jobs:
           echo "--- proof evidence ---" | tee -a proof.log
           cat proof-evidence-scheduled.txt 2>/dev/null | tee -a proof.log || echo "(no scheduled evidence)"
           cat proof-evidence-control.txt 2>/dev/null | tee -a proof.log || echo "(no control evidence)"
+          echo "--- agent events ---" | tee -a proof.log
+          cat proof-agent-events.txt 2>/dev/null | tee -a proof.log || echo "(no agent events)"
           exit $status
 
       - name: Upload proof log

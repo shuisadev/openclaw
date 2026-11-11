@@ -10,6 +10,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { resolveClaudeCliProjectDirForWorkspace } from "../agents/command/claude-cli-project-dir.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import { onAgentEvent } from "../infra/agent-events.js";
 import { resolveExecutablePath } from "../infra/executable-path.js";
 import { setTestEnvValue } from "../test-utils/env.js";
 import {
@@ -221,16 +222,32 @@ async function withProofGateway(
 
 async function chatTurn(fixture: ProofFixture) {
   const sessionKey = `agent:main:proof-${randomUUID()}`;
-  const accepted = await fixture.gateway.client.request<{ runId: string }>("chat.send", {
-    sessionKey,
-    message: "Remind me tomorrow at 9am to call the dentist.",
-    deliver: false,
-    idempotencyKey: randomUUID(),
+  const seen: string[] = [];
+  const stopEvents = onAgentEvent((event) => {
+    seen.push(
+      `${event.stream}:${JSON.stringify(event.data ?? null).slice(0, 900)}` +
+        ` err=${String((event as { error?: unknown }).error ?? "-").slice(0, 600)}`,
+    );
   });
-  const completed = await fixture.gateway.client.request(
-    "agent.wait",
-    { runId: accepted.runId, timeoutMs: 90_000 },
-    { timeoutMs: 95_000 },
+  let accepted: { runId: string };
+  try {
+    accepted = await fixture.gateway.client.request<{ runId: string }>("chat.send", {
+      sessionKey,
+      message: "Remind me tomorrow at 9am to call the dentist.",
+      deliver: false,
+      idempotencyKey: randomUUID(),
+    });
+    const completed = await fixture.gateway.client.request(
+      "agent.wait",
+      { runId: accepted.runId, timeoutMs: 90_000 },
+      { timeoutMs: 95_000 },
+    );
+  } finally {
+    stopEvents();
+  }
+  await fs.appendFile(
+    `${process.cwd()}/proof-agent-events.txt`,
+    `${sessionKey}\n${seen.slice(-40).join("\n")}\n`,
   );
   const history = await fixture.gateway.client.request<{ messages: unknown[] }>("chat.history", {
     sessionKey,
