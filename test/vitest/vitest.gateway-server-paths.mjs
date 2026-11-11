@@ -687,6 +687,8 @@ export const gatewayServerIsolatedTestFiles = [
   "src/gateway/server-plugin-subagent-runtime.overrides.test.ts",
   // Loads the real plugin runtime that neighboring server tests replace with mocks.
   "src/gateway/server.chat-cli-auth.test.ts",
+  // Temporary #193958 proof harness: spawns the CLI fixture like the auth lane.
+  "src/gateway/cli-scheduler-add-proof.test.ts",
   "src/gateway/server.chat-recovered-output.test.ts",
   "src/gateway/server.cli-watchdog.test.ts",
   "src/gateway/server.codex-failure-recovery.test.ts",
