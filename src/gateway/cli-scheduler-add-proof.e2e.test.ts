@@ -212,6 +212,24 @@ describe("#193958 real CLI path proof", () => {
         },
       },
       async () => {
+        // The gateway logs run failures to stdio; Vitest silences it in this lane.
+        const originalStdout = process.stdout.write.bind(process.stdout);
+        const originalStderr = process.stderr.write.bind(process.stderr);
+        const capture = (stream: "out" | "err", chunk: unknown) => {
+          const text =
+            typeof chunk === "string" ? chunk : Buffer.from(chunk as Uint8Array).toString();
+          if (/error|fail|claude|runtime|refus|denied|unknown|missing/i.test(text)) {
+            record(`[${stream}] ${text.trim().slice(0, 1200)}`);
+          }
+        };
+        process.stdout.write = ((chunk: never, ...rest: never[]) => {
+          capture("out", chunk);
+          return originalStdout(chunk, ...rest);
+        }) as typeof process.stdout.write;
+        process.stderr.write = ((chunk: never, ...rest: never[]) => {
+          capture("err", chunk);
+          return originalStderr(chunk, ...rest);
+        }) as typeof process.stderr.write;
         const fixture = createChatFixture("cli-scheduler-proof", {
           configure: (config) => ({
             ...config,
@@ -266,6 +284,8 @@ describe("#193958 real CLI path proof", () => {
           record(`gateway log tails:\n${collectLogTails(os.tmpdir(), 3, 4000)}`);
           return { notePresent, sawToolResult, sawSchedulerToolUse, completed, historyJson };
         } finally {
+          process.stdout.write = originalStdout as typeof process.stdout.write;
+          process.stderr.write = originalStderr as typeof process.stderr.write;
           await fixture.close();
         }
       },
