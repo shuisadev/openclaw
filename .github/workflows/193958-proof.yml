@@ -48,10 +48,15 @@ jobs:
             echo "### claude: $(claude --version 2>&1 | head -1)"
             echo "### head: $(git rev-parse HEAD)"
           } | tee proof.log
+          set +e
           node scripts/run-vitest.mjs run \
             --config test/vitest/vitest.e2e.config.ts \
             src/gateway/cli-scheduler-add-proof.e2e.test.ts \
             2>&1 | tee -a proof.log
+          status=${PIPESTATUS[0]}
+          echo "--- proof evidence ---" | tee -a proof.log
+          cat proof-evidence.txt 2>/dev/null | tee -a proof.log || echo "(no evidence file)"
+          exit $status
 
       - name: Upload proof log
         if: always()
