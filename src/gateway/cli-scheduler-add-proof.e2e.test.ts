@@ -10,7 +10,7 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { readRequestText } from "../../test/helpers/gateway-integration-fixtures.js";
 import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
-import { createChatFixture, sendChatAndWait } from "./gateway-chat-fixture.test-support.js";
+import { createChatFixture } from "./gateway-chat-fixture.test-support.js";
 import { KERNEL_TEST_ENV } from "./test-helpers.env.js";
 
 const CLAUDE_BIN =
@@ -174,12 +174,18 @@ describe("#193958 real CLI path proof", () => {
         await fixture.start();
         try {
           const sessionKey = `agent:main:proof-${randomUUID()}`;
-          await sendChatAndWait(
-            fixture.client,
+          const accepted = await fixture.client.request<{ runId: string }>("chat.send", {
             sessionKey,
-            "Remind me tomorrow at 9am to call the dentist.",
-            150_000,
-          );
+            message: "Remind me tomorrow at 9am to call the dentist.",
+            deliver: true,
+            idempotencyKey: randomUUID(),
+          });
+          const completed = await fixture.client.request("agent.wait", {
+            runId: accepted.runId,
+            timeoutMs: 150_000,
+          });
+          console.log(`\n### agent.wait ${label}: ${JSON.stringify(completed).slice(0, 1500)}`);
+          console.log(`### fixture errors: ${JSON.stringify(fixture.errors).slice(0, 1500)}`);
           const history = await fixture.client.request<{ messages: unknown[] }>("chat.history", {
             sessionKey,
             limit: 100,
