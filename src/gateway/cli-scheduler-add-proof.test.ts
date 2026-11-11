@@ -60,7 +60,7 @@ if (process.argv.includes("--version")) {
 // The shipped launcher probes account state before it launches a turn.
 if (process.argv.includes("auth")) {
   log("auth probe argv=" + process.argv.slice(1).join(" "));
-  send({ loggedIn: false });
+  send({ loggedIn: true });
   process.exit(0);
 }
 
