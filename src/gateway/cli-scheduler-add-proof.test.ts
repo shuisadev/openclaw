@@ -10,6 +10,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { resolveClaudeCliProjectDirForWorkspace } from "../agents/command/claude-cli-project-dir.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import { resolveExecutablePath } from "../infra/executable-path.js";
 import { setTestEnvValue } from "../test-utils/env.js";
 import {
   createOpenClawTestState,
@@ -178,9 +179,12 @@ async function withProofGateway(
     const executable = path.join(binDir, process.platform === "win32" ? "claude.cmd" : "claude");
     await fs.writeFile(executable, `#!${process.execPath}\n${script}`, { mode: 0o755 });
     setTestEnvValue("PATH", binDir);
+    expect(resolveExecutablePath("claude")).toBe(executable);
     const nativeRoot = path.join(state.home, ".claude");
     setTestEnvValue("CLAUDE_CONFIG_DIR", nativeRoot);
     await fs.mkdir(nativeRoot, { recursive: true });
+
+    await state.writeAuthProfiles({ version: 1, profiles: {} });
 
     const token = "cli-scheduler-proof";
     const cfg: OpenClawConfig = createClaudeCliGatewayConfig(workspaceDir, MODEL_REF, token);
@@ -209,7 +213,7 @@ async function chatTurn(fixture: ProofFixture) {
   const accepted = await fixture.gateway.client.request<{ runId: string }>("chat.send", {
     sessionKey,
     message: "Remind me tomorrow at 9am to call the dentist.",
-    deliver: true,
+    deliver: false,
     idempotencyKey: randomUUID(),
   });
   const completed = await fixture.gateway.client.request(
