@@ -215,7 +215,10 @@ async function withProofGateway(
     await state.writeAuthProfiles({ version: 1, profiles: {} });
 
     const token = "cli-scheduler-proof";
-    const cfg: OpenClawConfig = createClaudeCliGatewayConfig(workspaceDir, MODEL_REF, token);
+    const cfg: OpenClawConfig = {
+      ...createClaudeCliGatewayConfig(workspaceDir, MODEL_REF, token),
+      tools: { allow: ["automations"] },
+    };
     gateway = await gatewayFixture.startGatewayWithClient({
       cfg,
       configPath: state.configPath,
@@ -246,7 +249,7 @@ async function chatTurn(fixture: ProofFixture) {
   const seen: string[] = [];
   const stopEvents = onAgentEvent((event) => {
     seen.push(
-      `${event.stream}:${JSON.stringify(event.data ?? null).slice(0, 900)}` +
+      `${event.stream}:${JSON.stringify(event.data ?? null).slice(0, 4000)}` +
         ` err=${String((event as { error?: unknown }).error ?? "-").slice(0, 600)}`,
     );
   });
@@ -256,7 +259,7 @@ async function chatTurn(fixture: ProofFixture) {
     accepted = await fixture.gateway.client.request<{ runId: string }>("chat.send", {
       sessionKey,
       message: "Remind me tomorrow at 9am to call the dentist.",
-      deliver: false,
+      deliver: true,
       idempotencyKey: randomUUID(),
     });
     completed = await fixture.gateway.client.request(
@@ -275,7 +278,16 @@ async function chatTurn(fixture: ProofFixture) {
     sessionKey,
     limit: 100,
   });
-  return { completed, historyJson: JSON.stringify(history.messages) };
+  const jobs = await fixture.gateway.client
+    .request<{ jobs?: unknown[] }>("cron.list", { includeDisabled: true })
+    .catch(() => ({ jobs: [] }));
+  return {
+    completed,
+    historyJson: JSON.stringify(history.messages),
+    eventText: seen.join("\n"),
+    jobCount: Array.isArray(jobs.jobs) ? jobs.jobs.length : 0,
+    jobsJson: JSON.stringify(jobs).slice(0, 1200),
+  };
 }
 
 describe("#193958 CLI scheduler add evidence", () => {
@@ -283,21 +295,25 @@ describe("#193958 CLI scheduler add evidence", () => {
     const evidencePath = path.join(process.cwd(), "proof-evidence-scheduled.txt");
     await fs.writeFile(evidencePath, "");
     await withProofGateway("cli-proof-scheduled", "add", evidencePath, async (fixture) => {
-      const { completed, historyJson } = await chatTurn(fixture);
+      const { completed, historyJson, eventText, jobCount, jobsJson } = await chatTurn(fixture);
+      const noteSeen = historyJson.includes(NOTE_FRAGMENT) || eventText.includes(NOTE_FRAGMENT);
       await fs.appendFile(
         evidencePath,
         [
           "",
           "===== SCHEDULED turn (mode=add) =====",
           `agent.wait: ${JSON.stringify(completed).slice(0, 800)}`,
-          `false reminder note present: ${historyJson.includes(NOTE_FRAGMENT)}`,
-          `history: ${historyJson.slice(0, 3000)}`,
+          `note present (history or events): ${noteSeen}`,
+          `cron jobs after the turn: ${jobCount}`,
+          `cron.list: ${jobsJson}`,
+          `history: ${historyJson.slice(0, 2500)}`,
           "",
         ].join("\n"),
       );
       expect(completed).toMatchObject({ status: "ok" });
       expect(historyJson).toContain(REMINDER_REPLY);
-      expect(historyJson).not.toContain(NOTE_FRAGMENT);
+      expect(jobCount).toBeGreaterThan(0);
+      expect(noteSeen).toBe(false);
     });
   }, 240_000);
 
@@ -305,21 +321,25 @@ describe("#193958 CLI scheduler add evidence", () => {
     const evidencePath = path.join(process.cwd(), "proof-evidence-control.txt");
     await fs.writeFile(evidencePath, "");
     await withProofGateway("cli-proof-control", "text", evidencePath, async (fixture) => {
-      const { completed, historyJson } = await chatTurn(fixture);
+      const { completed, historyJson, eventText, jobCount, jobsJson } = await chatTurn(fixture);
+      const noteSeen = historyJson.includes(NOTE_FRAGMENT) || eventText.includes(NOTE_FRAGMENT);
       await fs.appendFile(
         evidencePath,
         [
           "",
           "===== CONTROL turn (mode=text, no scheduler call) =====",
           `agent.wait: ${JSON.stringify(completed).slice(0, 800)}`,
-          `false reminder note present: ${historyJson.includes(NOTE_FRAGMENT)}`,
-          `history: ${historyJson.slice(0, 3000)}`,
+          `note present (history or events): ${noteSeen}`,
+          `cron jobs after the turn: ${jobCount}`,
+          `cron.list: ${jobsJson}`,
+          `history: ${historyJson.slice(0, 2500)}`,
           "",
         ].join("\n"),
       );
       expect(completed).toMatchObject({ status: "ok" });
       expect(historyJson).toContain(REMINDER_REPLY);
-      expect(historyJson).toContain(NOTE_FRAGMENT);
+      expect(jobCount).toBe(0);
+      expect(noteSeen).toBe(true);
     });
   }, 240_000);
 });
