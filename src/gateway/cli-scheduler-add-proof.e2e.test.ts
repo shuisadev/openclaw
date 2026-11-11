@@ -33,6 +33,44 @@ function record(line: string) {
   fs.writeFileSync(EVIDENCE_FILE, evidence.join("\n"));
 }
 
+/** Collect tails of recently written .log files under the test temp root. */
+function collectLogTails(root: string, maxFiles: number, maxChars: number): string {
+  const found: Array<{ path: string; mtime: number }> = [];
+  const cutoff = Date.now() - 15 * 60_000;
+  const walk = (dir: string, depth: number) => {
+    if (depth > 5) return;
+    let entries: fs.Dirent[] = [];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(full, depth + 1);
+        continue;
+      }
+      if (!entry.name.endsWith(".log")) continue;
+      try {
+        const stat = fs.statSync(full);
+        if (stat.mtimeMs >= cutoff) found.push({ path: full, mtime: stat.mtimeMs });
+      } catch {
+        // ignore
+      }
+    }
+  };
+  walk(root, 0);
+  const tails = found
+    .toSorted((a, b) => b.mtime - a.mtime)
+    .slice(0, maxFiles)
+    .map((file) => {
+      const text = fs.readFileSync(file.path, "utf8");
+      return `--- ${file.path} ---\n${text.slice(-maxChars)}`;
+    });
+  return tails.length > 0 ? tails.join("\n") : "(no recent log files)";
+}
+
 function messageStart() {
   return {
     type: "message_start",
@@ -184,6 +222,12 @@ describe("#193958 real CLI path proof", () => {
               },
             },
           }),
+          onEvent: (payload: unknown) => {
+            const shaped = payload as { event?: { stream?: string; data?: unknown } };
+            if (shaped.event?.stream === "lifecycle") {
+              record(`lifecycle: ${JSON.stringify(shaped.event.data).slice(0, 1500)}`);
+            }
+          },
         });
         await fixture.start();
         try {
@@ -219,6 +263,7 @@ describe("#193958 real CLI path proof", () => {
             ? fs.readFileSync(CLAUDE_STDERR_FILE, "utf8")
             : "(none)";
           record(`claude stderr (last 2500): ${stderr.slice(-2500)}`);
+          record(`gateway log tails:\n${collectLogTails(os.tmpdir(), 3, 4000)}`);
           return { notePresent, sawToolResult, sawSchedulerToolUse, completed, historyJson };
         } finally {
           await fixture.close();
