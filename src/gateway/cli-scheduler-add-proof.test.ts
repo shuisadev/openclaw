@@ -301,6 +301,16 @@ async function withProofGateway(
   }
 }
 
+/** Cron jobs only cover the reminder guard when they belong to this session. */
+function readJobSessionKey(job: unknown): string | undefined {
+  const sessionKey = (job as { sessionKey?: unknown } | null)?.sessionKey;
+  return typeof sessionKey === "string" ? sessionKey : undefined;
+}
+
+function readJobEnabled(job: unknown): boolean {
+  return (job as { enabled?: unknown } | null)?.enabled === true;
+}
+
 async function chatTurn(fixture: ProofFixture) {
   const sessionKey = `agent:main:proof-${randomUUID()}`;
   await fixture.gateway.client.request("sessions.create", {
@@ -365,6 +375,7 @@ async function chatTurn(fixture: ProofFixture) {
     eventText: seen.join("\n"),
     deliveredTexts,
     finalFramesRaw,
+    jobs: Array.isArray(jobs.jobs) ? jobs.jobs : [],
     jobCount: Array.isArray(jobs.jobs) ? jobs.jobs.length : 0,
     jobsJson: JSON.stringify(jobs).slice(0, 1200),
   };
@@ -382,11 +393,14 @@ describe("#193958 CLI scheduler add evidence", () => {
         historyJson,
         deliveredTexts,
         finalFramesRaw,
+        jobs,
         jobCount,
         jobsJson,
       } = await chatTurn(fixture);
       const deliveredNote = deliveredTexts.some((text) => text.includes(NOTE_FRAGMENT));
-      const jobCoversTurnSession = jobsJson.includes(`"sessionKey":${JSON.stringify(sessionKey)}`);
+      const jobCoversTurnSession = jobs.some(
+        (job) => readJobSessionKey(job) === sessionKey && readJobEnabled(job),
+      );
       await fs.appendFile(
         evidencePath,
         [
