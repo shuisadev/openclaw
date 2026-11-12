@@ -184,6 +184,13 @@ export async function finalizeChatSendDispatchedReplies(
     suppressReplies,
   });
   const rawFinalPayloads = selectedInputs.map(readChatSendReplyPayload);
+  // TEMPORARY #193958 proof diagnostic - not part of the PR.
+  if (process.env.OPENCLAW_193958_DIAG === "1") {
+    console.log(
+      `[deliver-diag] inputs=${JSON.stringify(rawFinalPayloads.map((p) => p.text ?? null))} ` +
+        `runtimeOwnsTranscript=${String(params.runtimeOwnsTranscript)}`,
+    );
+  }
   const { authorizeDelivery, captureMediaScope, release } =
     await createChatSendReplyFinalizationAuthority(params, rawFinalPayloads, () =>
       broadcastChatFinal({
@@ -276,6 +283,14 @@ export async function finalizeChatSendDispatchedReplies(
       includeSensitiveDisplay: true,
       logGateway: context.logGateway,
     });
+    // TEMPORARY #193958 proof diagnostic - not part of the PR.
+    if (process.env.OPENCLAW_193958_DIAG === "1") {
+      console.log(
+        `[deliver-diag] broadcast=${JSON.stringify(
+          extractAssistantDisplayText(broadcastAssistantContent) ?? null,
+        )}`,
+      );
+    }
     const ttsSupplementMarker = finalPayloads
       .map((payload) => buildMediaOnlyTtsSupplementTranscriptMarker(payload))
       .find((marker): marker is GatewayInjectedTtsSupplementMarker => Boolean(marker));

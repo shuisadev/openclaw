@@ -50,7 +50,7 @@ jobs:
           cat proof-evidence-scheduled.txt 2>/dev/null | tee -a proof.log || echo "(no scheduled evidence)"
           cat proof-evidence-control.txt 2>/dev/null | tee -a proof.log || echo "(no control evidence)"
           echo "--- guard diagnostics ---" | tee -a proof.log
-          { grep -a "\[guard-diag\]" proof.log || true; } > guard-diag.txt
+          { grep -a -e "\[guard-diag\]" -e "\[deliver-diag\]" proof.log || true; } > guard-diag.txt
           cat guard-diag.txt | tee -a proof.log
           echo "--- agent events ---" | tee -a proof.log
           cat proof-agent-events.txt 2>/dev/null | tee -a proof.log || echo "(no agent events)"

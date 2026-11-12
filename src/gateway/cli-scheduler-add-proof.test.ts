@@ -187,7 +187,7 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
 `;
 }
 
-type ChatFrame = { sessionKey?: string; state?: string; text: string };
+type ChatFrame = { sessionKey?: string; state?: string; text: string; raw: string };
 
 type ProofFixture = {
   state: OpenClawTestState;
@@ -283,6 +283,7 @@ async function withProofGateway(
           sessionKey: typeof payload?.sessionKey === "string" ? payload.sessionKey : undefined,
           state: typeof payload?.state === "string" ? payload.state : undefined,
           text: readChatFrameText(event.payload),
+          raw: JSON.stringify(event.payload).slice(0, 600),
         });
       },
     });
@@ -339,9 +340,12 @@ async function chatTurn(fixture: ProofFixture) {
     sessionKey,
     limit: 100,
   });
+  const readFinalFrames = () =>
+    fixture.chatFrames.filter(
+      (frame) => frame.sessionKey === sessionKey && frame.state === "final",
+    );
   const readDeliveredTexts = () =>
-    fixture.chatFrames
-      .filter((frame) => frame.sessionKey === sessionKey && frame.state === "final")
+    readFinalFrames()
       .map((frame) => frame.text)
       .filter((text) => text.length > 0);
   // Delivery runs after the run settles; wait for the terminal client message.
@@ -350,6 +354,7 @@ async function chatTurn(fixture: ProofFixture) {
     await new Promise((resolve) => setTimeout(resolve, 500));
     deliveredTexts = readDeliveredTexts();
   }
+  const finalFramesRaw = readFinalFrames().map((frame) => frame.raw);
   const jobs = await fixture.gateway.client
     .request<{ jobs?: unknown[] }>("cron.list", { includeDisabled: true })
     .catch(() => ({ jobs: [] }));
@@ -358,6 +363,7 @@ async function chatTurn(fixture: ProofFixture) {
     historyJson: JSON.stringify(history.messages),
     eventText: seen.join("\n"),
     deliveredTexts,
+    finalFramesRaw,
     jobCount: Array.isArray(jobs.jobs) ? jobs.jobs.length : 0,
     jobsJson: JSON.stringify(jobs).slice(0, 1200),
   };
@@ -368,7 +374,7 @@ describe("#193958 CLI scheduler add evidence", () => {
     const evidencePath = path.join(process.cwd(), "proof-evidence-scheduled.txt");
     await fs.writeFile(evidencePath, "");
     await withProofGateway("cli-proof-scheduled", "add", evidencePath, async (fixture) => {
-      const { completed, historyJson, eventText, deliveredTexts, jobCount, jobsJson } =
+      const { completed, historyJson, deliveredTexts, finalFramesRaw, jobCount, jobsJson } =
         await chatTurn(fixture);
       const deliveredNote = deliveredTexts.some((text) => text.includes(NOTE_FRAGMENT));
       await fs.appendFile(
@@ -379,6 +385,7 @@ describe("#193958 CLI scheduler add evidence", () => {
           `agent.wait: ${JSON.stringify(completed).slice(0, 800)}`,
           `delivered chat frames (final): ${deliveredTexts.length}`,
           `DELIVERED reply text: ${JSON.stringify(deliveredTexts)}`,
+          `all final chat frames (raw): ${JSON.stringify(finalFramesRaw)}`,
           `note in delivered reply: ${deliveredNote}`,
           `cron jobs after the turn: ${jobCount}`,
           `cron.list: ${jobsJson}`,
@@ -400,7 +407,7 @@ describe("#193958 CLI scheduler add evidence", () => {
     const evidencePath = path.join(process.cwd(), "proof-evidence-control.txt");
     await fs.writeFile(evidencePath, "");
     await withProofGateway("cli-proof-control", "list", evidencePath, async (fixture) => {
-      const { completed, historyJson, deliveredTexts, jobCount, jobsJson } =
+      const { completed, historyJson, deliveredTexts, finalFramesRaw, jobCount, jobsJson } =
         await chatTurn(fixture);
       const deliveredNote = deliveredTexts.some((text) => text.includes(NOTE_FRAGMENT));
       await fs.appendFile(
@@ -411,6 +418,7 @@ describe("#193958 CLI scheduler add evidence", () => {
           `agent.wait: ${JSON.stringify(completed).slice(0, 800)}`,
           `delivered chat frames (final): ${deliveredTexts.length}`,
           `DELIVERED reply text: ${JSON.stringify(deliveredTexts)}`,
+          `all final chat frames (raw): ${JSON.stringify(finalFramesRaw)}`,
           `note in delivered reply: ${deliveredNote}`,
           `cron jobs after the turn: ${jobCount}`,
           `cron.list: ${jobsJson}`,
