@@ -12,8 +12,13 @@ async function sourceFixture(filename = "meeting-notes.txt", content = "hello fr
   const inputPath = path.join(rootDir, filename);
   const { config } = await createVault({ rootDir: path.join(rootDir, "vault") });
   await fs.writeFile(inputPath, content, "utf8");
-  const ingest = () =>
-    ingestMemoryWikiSource({ config, inputPath, nowMs: Date.UTC(2026, 3, 5, 12) });
+  const ingest = (title?: string) =>
+    ingestMemoryWikiSource({
+      config,
+      inputPath,
+      ...(title !== undefined ? { title } : {}),
+      nowMs: Date.UTC(2026, 3, 5, 12),
+    });
   const read = (file: string) => fs.readFile(path.join(config.vault.path, file), "utf8");
   return { config, inputPath, ingest, read };
 }
@@ -73,6 +78,57 @@ describe("ingestMemoryWikiSource", () => {
       ["## Content", "`````text", content, "`````", "", "## Notes"].join("\n"),
     );
     await expect(read("index.md")).resolves.toContain("[backticks](sources/backticks.md)");
+  });
+
+  it.each([
+    ["precomposed (NFC)", "café"],
+    ["decomposed (NFD)", "cafe\u0301"],
+  ] as const)("maps %s titles onto one canonical source page", async (_label, title) => {
+    const { config, ingest } = await sourceFixture();
+    const result = await ingest(title);
+    expect(result).toMatchObject({ pagePath: "sources/café.md", pageId: "source.café" });
+    const sources = await fs.readdir(path.join(config.vault.path, "sources"));
+    expect(sources.filter((name) => name.endsWith(".md") && name !== "index.md")).toEqual([
+      "café.md",
+    ]);
+  });
+
+  it("reuses a released decomposed page instead of creating a duplicate", async () => {
+    const { config, ingest } = await sourceFixture();
+    const nfd = "cafe\u0301";
+    const publishedPath = path.join(config.vault.path, "sources", `${nfd}.md`);
+    await fs.mkdir(path.dirname(publishedPath), { recursive: true });
+    await fs.writeFile(
+      publishedPath,
+      [
+        "---",
+        "pageType: source",
+        `id: source.${nfd}`,
+        `title: ${nfd}`,
+        "---",
+        "",
+        `# ${nfd}`,
+        "",
+        "## Notes",
+        "<!-- openclaw:human:start -->",
+        "HANDWRITTEN NOTE MUST SURVIVE",
+        "<!-- openclaw:human:end -->",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const result = await ingest("café");
+    expect(result).toMatchObject({
+      pagePath: `sources/${nfd}.md`,
+      pageId: `source.${nfd}`,
+      created: false,
+    });
+    expect(await fs.readFile(publishedPath, "utf8")).toContain("HANDWRITTEN NOTE MUST SURVIVE");
+    const sources = await fs.readdir(path.join(config.vault.path, "sources"));
+    expect(sources.filter((name) => name.endsWith(".md") && name !== "index.md")).toEqual([
+      `${nfd}.md`,
+    ]);
   });
 
   it("queues behind a held vault mutation instead of writing mid-transaction", async () => {

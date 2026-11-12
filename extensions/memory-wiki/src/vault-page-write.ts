@@ -1,10 +1,40 @@
+import path from "node:path";
 import {
   replaceManagedMarkdownBlock,
   withTrailingNewline,
 } from "openclaw/plugin-sdk/memory-host-markdown";
 import { retryAsync } from "openclaw/plugin-sdk/retry-runtime";
-import { FsSafeError, root as fsRoot } from "openclaw/plugin-sdk/security-runtime";
-import { decodeWikiPageUtf8, parseWikiMarkdown } from "./markdown.js";
+import { FsSafeError, pathExists, root as fsRoot } from "openclaw/plugin-sdk/security-runtime";
+import {
+  decodeWikiPageUtf8,
+  parseWikiMarkdown,
+  slugifyWikiPageStem,
+  slugifyWikiSegment,
+} from "./markdown.js";
+
+/**
+ * Derive the identity for a page write. New pages get a canonical (NFC) stem so
+ * NFC/NFD spellings of one visual title cannot create two files. A released
+ * vault may already hold the decomposed (NFD) spelling with hand-written Notes
+ * and a frontmatter ID; reuse that exact stem so upgrades keep the path instead
+ * of creating a duplicate page.
+ */
+export async function resolveWikiPageIdentity(params: {
+  rootDir: string;
+  relativeDir: string;
+  title: string;
+}): Promise<{ slug: string; stem: string }> {
+  const canonicalTitle = params.title.normalize("NFC");
+  const canonicalStem = slugifyWikiPageStem(canonicalTitle);
+  const decomposedStem = slugifyWikiPageStem(canonicalTitle.normalize("NFD"));
+  if (decomposedStem !== canonicalStem) {
+    const publishedPath = path.join(params.rootDir, params.relativeDir, `${decomposedStem}.md`);
+    if (await pathExists(publishedPath)) {
+      return { slug: slugifyWikiSegment(decomposedStem), stem: decomposedStem };
+    }
+  }
+  return { slug: slugifyWikiSegment(canonicalTitle), stem: canonicalStem };
+}
 
 type VaultRoot = Awaited<ReturnType<typeof fsRoot>>;
 
