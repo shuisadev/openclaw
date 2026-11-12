@@ -13,6 +13,13 @@ const REMINDER_COMMITMENT_PATTERNS: RegExp[] = [
   /\b(?:i\s*['’]?ll|i will)\s+(?:set|create|schedule)\s+(?:a\s+)?reminder\b/i,
 ];
 
+// TEMPORARY #193958 proof diagnostic - not part of the PR.
+function diag(message: string): void {
+  if (process.env.OPENCLAW_193958_DIAG === "1") {
+    console.log(`[guard-diag] ${message}`);
+  }
+}
+
 /** Returns true when text promises a reminder/follow-up without the guard note. */
 export function hasUnbackedReminderCommitment(text: string): boolean {
   const normalized = normalizeLowercaseStringOrEmpty(text);
@@ -22,7 +29,9 @@ export function hasUnbackedReminderCommitment(text: string): boolean {
   if (normalized.includes(normalizeLowercaseStringOrEmpty(UNSCHEDULED_REMINDER_NOTE))) {
     return false;
   }
-  return REMINDER_COMMITMENT_PATTERNS.some((pattern) => pattern.test(text));
+  const matched = REMINDER_COMMITMENT_PATTERNS.some((pattern) => pattern.test(text));
+  diag(`commitment=${matched} text=${JSON.stringify(text.slice(0, 160))}`);
+  return matched;
 }
 
 /**
@@ -44,6 +53,7 @@ export async function hasSessionRelatedCronJobs(sessionKey: string | undefined):
 
 /** Appends the unscheduled-reminder note to the first payload that needs it. */
 export function appendUnscheduledReminderNote(payloads: ReplyPayload[]): ReplyPayload[] {
+  diag(`append-called payloads=${payloads.length}`);
   let appended = false;
   return payloads.map((payload) => {
     if (appended || payload.isError || payload.text === undefined) {

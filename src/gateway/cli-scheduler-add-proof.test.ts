@@ -36,7 +36,7 @@ const SCHEDULER_JOB = {
 };
 
 function fakeClaudeScript(options: {
-  mode: "add" | "text";
+  mode: "add" | "list" | "text";
   projectDir: string;
   evidencePath: string;
 }) {
@@ -75,7 +75,7 @@ const resumeIndex = process.argv.indexOf("--resume");
 const sessionId = process.argv[(resumeIndex >= 0 ? resumeIndex : sessionIndex) + 1];
 const reply = ${JSON.stringify(REMINDER_REPLY)};
 
-async function callSchedulerTool() {
+async function callSchedulerTool(action) {
   const config = JSON.parse(readFileSync(mcpConfigPath, "utf8"));
   const serverName = Object.keys(config.mcpServers)[0];
   const server = config.mcpServers[serverName];
@@ -93,12 +93,15 @@ async function callSchedulerTool() {
       method: "tools/call",
       params: {
         name: "automations",
-        arguments: { action: "add", job: ${JSON.stringify(SCHEDULER_JOB)} },
+        arguments:
+          action === "add"
+            ? { action: "add", job: ${JSON.stringify(SCHEDULER_JOB)} }
+            : { action: action },
       },
     }),
   });
   const text = await response.text();
-  log("mcp tools/call status=" + response.status + " body=" + text.slice(0, 500));
+  log("mcp tools/call action=" + action + " status=" + response.status + " body=" + text.slice(0, 500));
   return { ok: response.ok, text };
 }
 
@@ -128,8 +131,8 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
     mcp_servers: mcpConfigPath ? [{ name: "openclaw", status: "connected" }] : [],
   });
 
-  if (MODE === "add") {
-    const result = await callSchedulerTool();
+  if (MODE === "add" || MODE === "list") {
+    const result = await callSchedulerTool(MODE);
     const toolId = "toolu_" + randomUUID();
     const assistantUuid = randomUUID();
     const toolUseMessage = {
@@ -138,7 +141,10 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
         type: "tool_use",
         id: toolId,
         name: "mcp__openclaw__automations",
-        input: { action: "add", job: ${JSON.stringify(SCHEDULER_JOB)} },
+        input:
+          MODE === "add"
+            ? { action: "add", job: ${JSON.stringify(SCHEDULER_JOB)} }
+            : { action: MODE },
       }],
     };
     send({ type: "assistant", uuid: assistantUuid, message: toolUseMessage });
@@ -228,7 +234,7 @@ function readChatFrameText(payload: unknown): string {
 
 async function withProofGateway(
   label: string,
-  mode: "add" | "text",
+  mode: "add" | "list" | "text",
   evidencePath: string,
   run: (fixture: ProofFixture) => Promise<void>,
 ) {
@@ -390,10 +396,10 @@ describe("#193958 CLI scheduler add evidence", () => {
     });
   }, 240_000);
 
-  it("still reports the note when no scheduler add happened", async () => {
+  it("still reports the note when the same tool ran a non-add action", async () => {
     const evidencePath = path.join(process.cwd(), "proof-evidence-control.txt");
     await fs.writeFile(evidencePath, "");
-    await withProofGateway("cli-proof-control", "text", evidencePath, async (fixture) => {
+    await withProofGateway("cli-proof-control", "list", evidencePath, async (fixture) => {
       const { completed, historyJson, deliveredTexts, jobCount, jobsJson } =
         await chatTurn(fixture);
       const deliveredNote = deliveredTexts.some((text) => text.includes(NOTE_FRAGMENT));
@@ -401,7 +407,7 @@ describe("#193958 CLI scheduler add evidence", () => {
         evidencePath,
         [
           "",
-          "===== CONTROL turn (mode=text, no scheduler call) =====",
+          "===== CONTROL turn (mode=list: same MCP tool, non-add action) =====",
           `agent.wait: ${JSON.stringify(completed).slice(0, 800)}`,
           `delivered chat frames (final): ${deliveredTexts.length}`,
           `DELIVERED reply text: ${JSON.stringify(deliveredTexts)}`,

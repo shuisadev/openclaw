@@ -32,6 +32,7 @@ jobs:
       - name: Run real CLI path proof
         env:
           NO_COLOR: "1"
+          OPENCLAW_193958_DIAG: "1"
         run: |
           set -euo pipefail
           {
@@ -48,6 +49,9 @@ jobs:
           echo "--- proof evidence ---" | tee -a proof.log
           cat proof-evidence-scheduled.txt 2>/dev/null | tee -a proof.log || echo "(no scheduled evidence)"
           cat proof-evidence-control.txt 2>/dev/null | tee -a proof.log || echo "(no control evidence)"
+          echo "--- guard diagnostics ---" | tee -a proof.log
+          { grep -a "\[guard-diag\]" proof.log || true; } > guard-diag.txt
+          cat guard-diag.txt | tee -a proof.log
           echo "--- agent events ---" | tee -a proof.log
           cat proof-agent-events.txt 2>/dev/null | tee -a proof.log || echo "(no agent events)"
           exit $status
@@ -57,5 +61,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: 193958-proof-log
-          path: proof.log
+          path: |
+            proof.log
+            guard-diag.txt
           retention-days: 14
