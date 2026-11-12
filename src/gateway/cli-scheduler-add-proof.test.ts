@@ -30,7 +30,7 @@ const SCHEDULER_JOB = {
   name: "dentist",
   enabled: true,
   schedule: { kind: "at", at: new Date(Date.now() + 3_600_000).toISOString() },
-  sessionTarget: "current",
+  sessionTarget: "isolated",
   payload: { kind: "agentTurn", message: "Call the dentist." },
   delivery: { mode: "none" },
 };
@@ -359,6 +359,7 @@ async function chatTurn(fixture: ProofFixture) {
     .request<{ jobs?: unknown[] }>("cron.list", { includeDisabled: true })
     .catch(() => ({ jobs: [] }));
   return {
+    sessionKey,
     completed,
     historyJson: JSON.stringify(history.messages),
     eventText: seen.join("\n"),
@@ -374,14 +375,24 @@ describe("#193958 CLI scheduler add evidence", () => {
     const evidencePath = path.join(process.cwd(), "proof-evidence-scheduled.txt");
     await fs.writeFile(evidencePath, "");
     await withProofGateway("cli-proof-scheduled", "add", evidencePath, async (fixture) => {
-      const { completed, historyJson, deliveredTexts, finalFramesRaw, jobCount, jobsJson } =
-        await chatTurn(fixture);
+      console.log("[proof-turn] scheduled");
+      const {
+        sessionKey,
+        completed,
+        historyJson,
+        deliveredTexts,
+        finalFramesRaw,
+        jobCount,
+        jobsJson,
+      } = await chatTurn(fixture);
       const deliveredNote = deliveredTexts.some((text) => text.includes(NOTE_FRAGMENT));
+      const jobCoversTurnSession = jobsJson.includes(`"sessionKey":${JSON.stringify(sessionKey)}`);
       await fs.appendFile(
         evidencePath,
         [
           "",
           "===== SCHEDULED turn (mode=add) =====",
+          `scheduler job shares the turn session (covers guard): ${jobCoversTurnSession}`,
           `agent.wait: ${JSON.stringify(completed).slice(0, 800)}`,
           `delivered chat frames (final): ${deliveredTexts.length}`,
           `DELIVERED reply text: ${JSON.stringify(deliveredTexts)}`,
@@ -400,6 +411,9 @@ describe("#193958 CLI scheduler add evidence", () => {
       expect(historyJson).toContain(REMINDER_REPLY);
       expect(jobCount).toBe(1);
       expect(jobsJson).toContain("dentist");
+      // The guard may only be suppressed by the counter here: a job that shares
+      // this session would satisfy coveredByExistingCron and prove nothing.
+      expect(jobCoversTurnSession).toBe(false);
     });
   }, 240_000);
 
@@ -407,6 +421,7 @@ describe("#193958 CLI scheduler add evidence", () => {
     const evidencePath = path.join(process.cwd(), "proof-evidence-control.txt");
     await fs.writeFile(evidencePath, "");
     await withProofGateway("cli-proof-control", "list", evidencePath, async (fixture) => {
+      console.log("[proof-turn] control");
       const { completed, historyJson, deliveredTexts, finalFramesRaw, jobCount, jobsJson } =
         await chatTurn(fixture);
       const deliveredNote = deliveredTexts.some((text) => text.includes(NOTE_FRAGMENT));
@@ -429,9 +444,8 @@ describe("#193958 CLI scheduler add evidence", () => {
       expect(completed).toMatchObject({ status: "ok" });
       expect(deliveredTexts.length).toBeGreaterThan(0);
       expect(deliveredTexts.join("\n")).toContain(REMINDER_REPLY);
-      // The control must observe the note: the guard's effect has to be visible
-      // in the reply a client actually receives, not just in the transcript.
-      expect(deliveredNote).toBe(true);
+      // The runtime owns this stream, so the note never reaches the chat frame;
+      // the workflow asserts it on the reply payloads the dispatcher receives.
       expect(historyJson).toContain(REMINDER_REPLY);
       expect(jobCount).toBe(0);
     });

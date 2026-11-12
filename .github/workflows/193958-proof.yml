@@ -52,6 +52,22 @@ jobs:
           echo "--- guard diagnostics ---" | tee -a proof.log
           { grep -a -e "\[guard-diag\]" -e "\[deliver-diag\]" proof.log || true; } > guard-diag.txt
           cat guard-diag.txt | tee -a proof.log
+          echo "--- payload assertions ---" | tee -a proof.log
+          segmented=$(awk '/\[proof-turn\]/{turn=$0} /\[guard-diag\]/{print turn" :: "$0}' proof.log)
+          echo "$segmented" | tee -a proof.log
+          if echo "$segmented" | grep -q "scheduled :: .*append-called"; then
+            echo "FAIL scheduled: the guard appended the note even though the counter recorded the add" | tee -a proof.log
+            exit 1
+          fi
+          if ! echo "$segmented" | grep -q "control :: .*appended-text=.*I did not schedule a reminder"; then
+            echo "FAIL control: the guard did not put the note on the reply payload" | tee -a proof.log
+            exit 1
+          fi
+          if echo "$segmented" | grep -q "matched=true"; then
+            echo "FAIL: an existing cron job covered this session, so the run cannot discriminate the counter" | tee -a proof.log
+            exit 1
+          fi
+          echo "OK scheduled payload carried no note; control payload carried it; existing-cron coverage stayed false" | tee -a proof.log
           echo "--- agent events ---" | tee -a proof.log
           cat proof-agent-events.txt 2>/dev/null | tee -a proof.log || echo "(no agent events)"
           exit $status

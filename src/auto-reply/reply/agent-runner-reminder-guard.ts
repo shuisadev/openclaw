@@ -42,9 +42,12 @@ export function hasUnbackedReminderCommitment(text: string): boolean {
 export async function hasSessionRelatedCronJobs(sessionKey: string | undefined): Promise<boolean> {
   try {
     const store = await loadCronJobsStore();
-    return Boolean(
+    const matched = Boolean(
       sessionKey && store.jobs.some((job) => job.enabled && job.sessionKey === sessionKey),
     );
+    // TEMPORARY #193958 proof diagnostic - not part of the PR.
+    diag(`session-cron-check matched=${matched} jobs=${store.jobs.length}`);
+    return matched;
   } catch {
     // If we cannot read the cron store, do not suppress the note.
     return false;
@@ -63,9 +66,9 @@ export function appendUnscheduledReminderNote(payloads: ReplyPayload[]): ReplyPa
       return payload;
     }
     appended = true;
-    return copyReplyPayloadMetadata(payload, {
-      ...payload,
-      text: `${payload.text.trimEnd()}\n\n${UNSCHEDULED_REMINDER_NOTE}`,
-    });
+    const notedText = `${payload.text.trimEnd()}\n\n${UNSCHEDULED_REMINDER_NOTE}`;
+    // TEMPORARY #193958 proof diagnostic - not part of the PR.
+    diag(`appended-text=${JSON.stringify(notedText)}`);
+    return copyReplyPayloadMetadata(payload, { ...payload, text: notedText });
   });
 }
