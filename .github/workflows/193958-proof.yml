@@ -29,23 +29,13 @@ jobs:
           install-deps: "true"
           frozen-lockfile: "true"
 
-      - name: Install Claude Code CLI
-        run: |
-          set -euo pipefail
-          npm install -g @anthropic-ai/claude-code
-          command -v claude
-          claude --version
-
       - name: Run real CLI path proof
         env:
           NO_COLOR: "1"
         run: |
           set -euo pipefail
-          export OPENCLAW_PROOF_CLAUDE_BIN="$(command -v claude)"
-          echo "proof claude binary: $OPENCLAW_PROOF_CLAUDE_BIN"
           {
             echo "### node $(node --version)"
-            echo "### claude: $(claude --version 2>&1 | head -1)"
             echo "### head: $(git rev-parse HEAD)"
           } | tee proof.log
           set +e

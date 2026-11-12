@@ -181,10 +181,50 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
 `;
 }
 
+type ChatFrame = { sessionKey?: string; state?: string; text: string };
+
 type ProofFixture = {
   state: OpenClawTestState;
   gateway: Awaited<ReturnType<typeof gatewayFixture.startGatewayWithClient>>;
+  /** Every `chat` frame this operator client received, in arrival order. */
+  chatFrames: ChatFrame[];
 };
+
+/**
+ * The guard note is appended to the reply payload after the run settles, so the
+ * transcript only ever holds the runtime's own assistant text. The delivered
+ * reply is the terminal `chat` message the Gateway pushes to a connected client.
+ */
+function readChatFrameText(payload: unknown): string {
+  if (!payload || typeof payload !== "object") {
+    return "";
+  }
+  const message = (payload as { message?: unknown }).message;
+  if (!message || typeof message !== "object") {
+    return "";
+  }
+  const parts: string[] = [];
+  const text = (message as { text?: unknown }).text;
+  if (typeof text === "string") {
+    parts.push(text);
+  }
+  const content = (message as { content?: unknown }).content;
+  if (Array.isArray(content)) {
+    for (const block of content) {
+      if (!block || typeof block !== "object") {
+        continue;
+      }
+      if ((block as { type?: unknown }).type !== "text") {
+        continue;
+      }
+      const blockText = (block as { text?: unknown }).text;
+      if (typeof blockText === "string") {
+        parts.push(blockText);
+      }
+    }
+  }
+  return parts.join("\n").trim();
+}
 
 async function withProofGateway(
   label: string,
@@ -197,6 +237,7 @@ async function withProofGateway(
     env: createClaudeCliGatewayEnv(),
   });
   let gateway: ProofFixture["gateway"] | undefined;
+  const chatFrames: ChatFrame[] = [];
   try {
     const workspaceDir = state.workspaceDir;
     await fs.mkdir(workspaceDir, { recursive: true });
@@ -227,9 +268,20 @@ async function withProofGateway(
       configPath: state.configPath,
       token,
       scopes: ["operator.admin", "operator.read", "operator.write"],
+      onEvent: (event) => {
+        if (event.event !== "chat") {
+          return;
+        }
+        const payload = event.payload as { sessionKey?: unknown; state?: unknown } | undefined;
+        chatFrames.push({
+          sessionKey: typeof payload?.sessionKey === "string" ? payload.sessionKey : undefined,
+          state: typeof payload?.state === "string" ? payload.state : undefined,
+          text: readChatFrameText(event.payload),
+        });
+      },
     });
     await gateway.server.startupSettled;
-    await run({ state, gateway });
+    await run({ state, gateway, chatFrames });
   } finally {
     if (gateway) {
       try {
@@ -281,19 +333,16 @@ async function chatTurn(fixture: ProofFixture) {
     sessionKey,
     limit: 100,
   });
-  let deliveredNote = false;
-  for (let attempt = 0; attempt < 15 && !deliveredNote; attempt += 1) {
-    deliveredNote =
-      JSON.stringify(history.messages).includes(NOTE_FRAGMENT) ||
-      seen.join("\n").includes(NOTE_FRAGMENT);
-    if (!deliveredNote) {
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-      const again = await fixture.gateway.client.request<{ messages: unknown[] }>("chat.history", {
-        sessionKey,
-        limit: 100,
-      });
-      history.messages = again.messages;
-    }
+  const readDeliveredTexts = () =>
+    fixture.chatFrames
+      .filter((frame) => frame.sessionKey === sessionKey && frame.state === "final")
+      .map((frame) => frame.text)
+      .filter((text) => text.length > 0);
+  // Delivery runs after the run settles; wait for the terminal client message.
+  let deliveredTexts = readDeliveredTexts();
+  for (let attempt = 0; attempt < 20 && deliveredTexts.length === 0; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    deliveredTexts = readDeliveredTexts();
   }
   const jobs = await fixture.gateway.client
     .request<{ jobs?: unknown[] }>("cron.list", { includeDisabled: true })
@@ -302,9 +351,9 @@ async function chatTurn(fixture: ProofFixture) {
     completed,
     historyJson: JSON.stringify(history.messages),
     eventText: seen.join("\n"),
+    deliveredTexts,
     jobCount: Array.isArray(jobs.jobs) ? jobs.jobs.length : 0,
     jobsJson: JSON.stringify(jobs).slice(0, 1200),
-    deliveredNote,
   };
 }
 
@@ -313,28 +362,31 @@ describe("#193958 CLI scheduler add evidence", () => {
     const evidencePath = path.join(process.cwd(), "proof-evidence-scheduled.txt");
     await fs.writeFile(evidencePath, "");
     await withProofGateway("cli-proof-scheduled", "add", evidencePath, async (fixture) => {
-      const { completed, historyJson, eventText, jobCount, jobsJson, deliveredNote } =
+      const { completed, historyJson, eventText, deliveredTexts, jobCount, jobsJson } =
         await chatTurn(fixture);
-      const noteSeen =
-        deliveredNote || historyJson.includes(NOTE_FRAGMENT) || eventText.includes(NOTE_FRAGMENT);
+      const deliveredNote = deliveredTexts.some((text) => text.includes(NOTE_FRAGMENT));
       await fs.appendFile(
         evidencePath,
         [
           "",
           "===== SCHEDULED turn (mode=add) =====",
           `agent.wait: ${JSON.stringify(completed).slice(0, 800)}`,
-          `note present (history or events): ${noteSeen}`,
+          `delivered chat frames (final): ${deliveredTexts.length}`,
+          `DELIVERED reply text: ${JSON.stringify(deliveredTexts)}`,
+          `note in delivered reply: ${deliveredNote}`,
           `cron jobs after the turn: ${jobCount}`,
           `cron.list: ${jobsJson}`,
-          `history: ${historyJson.slice(0, 2500)}`,
+          `history (runtime-owned transcript): ${historyJson.slice(0, 2500)}`,
           "",
         ].join("\n"),
       );
       expect(completed).toMatchObject({ status: "ok" });
+      expect(deliveredTexts.length).toBeGreaterThan(0);
+      expect(deliveredTexts.join("\n")).toContain(REMINDER_REPLY);
+      expect(deliveredNote).toBe(false);
       expect(historyJson).toContain(REMINDER_REPLY);
       expect(jobCount).toBe(1);
       expect(jobsJson).toContain("dentist");
-      expect(noteSeen).toBe(false);
     });
   }, 240_000);
 
@@ -342,27 +394,32 @@ describe("#193958 CLI scheduler add evidence", () => {
     const evidencePath = path.join(process.cwd(), "proof-evidence-control.txt");
     await fs.writeFile(evidencePath, "");
     await withProofGateway("cli-proof-control", "text", evidencePath, async (fixture) => {
-      const { completed, historyJson, eventText, jobCount, jobsJson, deliveredNote } =
+      const { completed, historyJson, deliveredTexts, jobCount, jobsJson } =
         await chatTurn(fixture);
-      const noteSeen =
-        deliveredNote || historyJson.includes(NOTE_FRAGMENT) || eventText.includes(NOTE_FRAGMENT);
+      const deliveredNote = deliveredTexts.some((text) => text.includes(NOTE_FRAGMENT));
       await fs.appendFile(
         evidencePath,
         [
           "",
           "===== CONTROL turn (mode=text, no scheduler call) =====",
           `agent.wait: ${JSON.stringify(completed).slice(0, 800)}`,
-          `note present (history or events): ${noteSeen}`,
+          `delivered chat frames (final): ${deliveredTexts.length}`,
+          `DELIVERED reply text: ${JSON.stringify(deliveredTexts)}`,
+          `note in delivered reply: ${deliveredNote}`,
           `cron jobs after the turn: ${jobCount}`,
           `cron.list: ${jobsJson}`,
-          `history: ${historyJson.slice(0, 2500)}`,
+          `history (runtime-owned transcript): ${historyJson.slice(0, 2500)}`,
           "",
         ].join("\n"),
       );
       expect(completed).toMatchObject({ status: "ok" });
+      expect(deliveredTexts.length).toBeGreaterThan(0);
+      expect(deliveredTexts.join("\n")).toContain(REMINDER_REPLY);
+      // The control must observe the note: the guard's effect has to be visible
+      // in the reply a client actually receives, not just in the transcript.
+      expect(deliveredNote).toBe(true);
       expect(historyJson).toContain(REMINDER_REPLY);
       expect(jobCount).toBe(0);
-      expect(noteSeen).toBe(false);
     });
   }, 240_000);
 });
